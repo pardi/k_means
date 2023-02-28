@@ -1,0 +1,21 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+numpy = "*"
+matplotlib = "*"
+scipy = "*"
+isort = "*"
+black = "*"
+flake8 = "*"
+imageio = "*"
+
+[dev-packages]
+pytest = "~=6.2.5"
+"pytest-flake8" = "~=1.0.7"
+scikit-learn = "*"
+
+[requires]
+python_version = "3.9"
