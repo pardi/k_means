@@ -34,10 +34,11 @@ def empty_clusters(clusters: List[Cluster]):
 
     return clusters
 
-def initialise_clusters(clusters: List[Cluster]):
+
+def initialise_clusters(clusters: List[Cluster], samples: np.array):
 
     for cluster in clusters:
-        cluster.mean = np.random.rand(2)
+        cluster.mean = 0.1 * np.random.rand(2, 1) + samples
 
     return clusters
 
@@ -56,6 +57,7 @@ def assignment_step(samples: np.array, clusters: List[Cluster]):
     empty_clusters(clusters=clusters)
 
     for sample in samples.transpose():
+        sample = sample.reshape(2, 1)
         nearest_cluster_idx = single_assignment_step(sample, clusters)
         clusters[nearest_cluster_idx].samples.append(sample)
 
@@ -66,7 +68,7 @@ def update_step(clusters: List[Cluster]):
     for cluster in clusters:
         if cluster.samples:
             cluster.mean = np.mean(cluster.samples, axis=0)
-
+            cluster.mean.reshape((2, 1))
     return clusters
 
 
@@ -79,6 +81,7 @@ def error_clusters(clusters: List[Cluster], old_error: float = 0):
         stop = False
     return stop, error
 
+
 def compute_angles(clusters: List[Cluster]):
     angles = []
 
@@ -88,30 +91,42 @@ def compute_angles(clusters: List[Cluster]):
 
     for cluster in clusters:
         vec = cluster.mean - mean_centroid
-        angles.append(np.arctan2(vec[1], vec[0]))
+        angles.append(float(np.arctan2(vec[1], vec[0])))
 
     return angles, mean_centroid
 
+
 def sample_mult_distr(means: np.array, stds: np.array):
 
-    distr_idx = np.random.choice(len(means))
+    distr_idx = np.random.choice(len(stds))
 
-    return np.random.normal(means[distr_idx], stds[distr_idx], size=(2, 1))
+    sample = np.zeros((2, 1))
+    sample[0] = np.random.normal(means[distr_idx][0], stds[distr_idx])
+    sample[1] = np.random.normal(means[distr_idx][1], stds[distr_idx])
+
+
+    return sample, distr_idx
+
 
 # Lloyd's algorithm
 def naive_kmeans():
     #
-    distr_means = np.random.rand(2) - .5
-    distr_stds = .1 * np.random.rand(2)
+    distr_means = np.random.rand(3, 2) - .5
+    distr_stds = .1 * np.random.rand(3)
 
     old_error = 1e10
 
-    clusters = [Cluster(np.array([0.2, 0.2]), "K1", []), Cluster(np.array([-0.2, 0.2]), "K2", [])]
-    clusters = initialise_clusters(clusters)
-    samples = sample_mult_distr(distr_means, distr_stds)
+    clusters = [Cluster(np.array([0.25, 0.2]), "K1", []), Cluster(np.array([0.2, 0.2]), "K2", []), Cluster(np.array([-0.2, 0.2]), "K3", [])]
+    samples, idx_distr = sample_mult_distr(distr_means, distr_stds)
+    clusters = initialise_clusters(clusters, samples)
 
-    for _ in range(10):
-        sample = sample_mult_distr(distr_means, distr_stds)
+    angles, mean_centroid = None, None
+    sample_v = []
+    for i in range(100):
+
+        sample, idx_distr = sample_mult_distr(distr_means, distr_stds)
+
+        sample_v.append((sample, idx_distr))
 
         samples = np.concatenate((samples, sample), axis=1)
 
@@ -121,23 +136,43 @@ def naive_kmeans():
 
         stop, old_error = error_clusters(clusters, old_error=old_error)
 
-        distr_angles, mean_centroid = compute_angles(clusters)
 
-        angles = distr_angles[0]
+        if i > 0:
+            distr_angles, mean_centroid = compute_angles(clusters)
 
-        plt.plot(samples[0], samples[1], 'o')
-        plt.plot(mean_centroid[0], mean_centroid[1], 'ok')
-        plt.plot([mean_centroid[0], mean_centroid[0] + np.cos(angles[0])],
-                 [mean_centroid[1], mean_centroid[1] + np.sin(angles[0])], 'k')
-        plt.plot([mean_centroid[0], mean_centroid[0] + np.cos(angles[1])],
-                 [mean_centroid[1], mean_centroid[1] + np.sin(angles[1])], 'k')
+            distr_angles.sort()
+            angles = [(distr_angles[0] + distr_angles[1]) / 2, (distr_angles[1] + distr_angles[2]) / 2, (distr_angles[2] + distr_angles[0] + 2 * np.pi) / 2]
+            # print(old_error)
+            plt.xlim([-1, 1])
+            plt.ylim([-1, 1])
 
-        plt.show()
+            # plt.plot(samples[0, :], samples[1, :], 'o')
+            sample_k1 = np.asarray([x for x, idx in sample_v if idx == 0])
+            sample_k2 = np.asarray([x for x, idx in sample_v if idx == 1])
+            sample_k3 = np.asarray([x for x, idx in sample_v if idx == 2])
+            if sample_k1.shape != (0,):
+                plt.plot(sample_k1[:, 0], sample_k1[:, 1], 'ro')
+            if sample_k2.shape != (0,):
+                plt.plot(sample_k2[:, 0], sample_k2[:, 1], 'go')
+            if sample_k3.shape != (0,):
+                plt.plot(sample_k3[:, 0], sample_k3[:, 1], 'yo')
 
-        print(old_error)
+            for cluster in clusters:
+                plt.plot(cluster.mean[0], cluster.mean[1], 'x')
 
-    a = 0
+            plt.plot(mean_centroid[0], mean_centroid[1], 'ok')
 
+            plt.plot([mean_centroid[0], mean_centroid[0] + np.cos(angles[0])],
+                     [mean_centroid[1], mean_centroid[1] + np.sin(angles[0])], 'k')
+            plt.plot([mean_centroid[0], mean_centroid[0] + np.cos(angles[1])],
+                     [mean_centroid[1], mean_centroid[1] + np.sin(angles[1])], 'k')
+            plt.plot([mean_centroid[0], mean_centroid[0] + np.cos(angles[2])],
+                     [mean_centroid[1], mean_centroid[1] + np.sin(angles[2])], 'k')
+
+            plt.grid()
+
+            plt.show()
+        a =0
 def kmeans():
 
     stds = .1 * np.random.rand(2)
