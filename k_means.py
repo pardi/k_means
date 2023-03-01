@@ -2,73 +2,39 @@ import logging
 
 import matplotlib.pyplot as plt
 import numpy as np
-from dataclasses import dataclass
 from typing import List
 
-import imageio.v2 as imageio
+from cluster import Cluster
+from sampler import Sampler
 
 logging.basicConfig(level=logging.INFO)
 
-def make_gif():
-
-    # build gif
-    # with imageio.get_writer('bayesian_opt.gif', mode='I') as writer:
-    images = []
-    for idx in range(100):
-        filename = str(idx) + '.png'
-        images.append(imageio.imread(filename))
-        # writer.append_data(image)
-
-    imageio.mimsave('bayesian_opt.gif', images)
-
-@dataclass
-class Cluster:
-    mean: np.array
-    name: str
-    samples: list
-
-def empty_clusters(clusters: List[Cluster]):
-
-    for cluster in clusters:
-        cluster.samples = []
-
-    return clusters
-
-
-def initialise_clusters(clusters: List[Cluster], samples: np.array):
-
-    for cluster in clusters:
-        cluster.mean = 0.1 * np.random.rand(2, 1) + samples
-
-    return clusters
-
-
-def single_assignment_step(sample: np.array, clusters: List[Cluster]):
-
-    means = [cluster.mean for cluster in clusters]
-
-    nearest_cluster_idx = np.argmin([np.linalg.norm(x) for x in sample - means])
-
-    return nearest_cluster_idx
-
-
 def assignment_step(samples: np.array, clusters: List[Cluster]):
 
-    empty_clusters(clusters=clusters)
+    # Tidy up cluster and obtain mean of each cluster
+    clusters_mean = []
+
+    for cluster in clusters:
+        cluster.empty()
+        clusters_mean.append(cluster.mean)
+
+    clusters_mean = np.array(clusters_mean).reshape(len(clusters), -1)
 
     for sample in samples.transpose():
-        sample = sample.reshape(2, 1)
-        nearest_cluster_idx = single_assignment_step(sample, clusters)
-        clusters[nearest_cluster_idx].samples.append(sample)
+        sample = sample.reshape(1, -1)
+
+        dist_from_clusters = np.linalg.norm(sample - clusters_mean, axis=1)
+
+        idx_nearest_cluster = np.argmin(dist_from_clusters)
+
+        clusters[idx_nearest_cluster].samples.append(sample)
 
     return clusters
 
 
 def update_step(clusters: List[Cluster]):
     for cluster in clusters:
-        if cluster.samples:
-            cluster.mean = np.mean(cluster.samples, axis=0)
-            cluster.mean.reshape((2, 1))
+        cluster.update_mean()
     return clusters
 
 
@@ -82,7 +48,7 @@ def error_clusters(clusters: List[Cluster], old_error: float = 0):
     return stop, error
 
 
-def compute_angles(clusters: List[Cluster]):
+def compute_sectors(clusters: List[Cluster]):
     angles = []
 
     means = [cluster.mean for cluster in clusters]
@@ -93,40 +59,37 @@ def compute_angles(clusters: List[Cluster]):
         vec = cluster.mean - mean_centroid
         angles.append(float(np.arctan2(vec[1], vec[0])))
 
-    return angles, mean_centroid
-
-
-def sample_mult_distr(means: np.array, stds: np.array):
-
-    distr_idx = np.random.choice(len(stds))
-
-    sample = np.zeros((2, 1))
-    sample[0] = np.random.normal(means[distr_idx][0], stds[distr_idx])
-    sample[1] = np.random.normal(means[distr_idx][1], stds[distr_idx])
-
-
-    return sample, distr_idx
+    angles.sort()
+    return mean_centroid, angles
 
 
 # Lloyd's algorithm
-def naive_kmeans():
-    #
-    distr_means = np.random.rand(3, 2) - .5
-    distr_stds = .1 * np.random.rand(3)
+def naive_kmeans(k_dim: int = 3, dim=2):
 
-    old_error = 1e10
+    cols_dict = {0: 'b',
+                 1: 'r',
+                 2: 'g',
+                 3: 'y',
+                 4: 'k'}
 
-    clusters = [Cluster(np.array([0.25, 0.2]), "K1", []), Cluster(np.array([0.2, 0.2]), "K2", []), Cluster(np.array([-0.2, 0.2]), "K3", [])]
-    samples, idx_distr = sample_mult_distr(distr_means, distr_stds)
-    clusters = initialise_clusters(clusters, samples)
+    # Create clusters
+    clusters = []
+    for idx_cluster in range(k_dim):
+        clusters.append(Cluster(col=cols_dict[idx_cluster]))
 
-    angles, mean_centroid = None, None
-    sample_v = []
-    for i in range(100):
+    # Create sample dataset
+    sample_dataset = {}
+    for idx_dim in range(k_dim):
+        sample_dataset[idx_dim] = []
 
-        sample, idx_distr = sample_mult_distr(distr_means, distr_stds)
+    sampler = Sampler(num_distributions=k_dim, dim=dim)
 
-        sample_v.append((sample, idx_distr))
+    samples, idx_distribution = next(sampler())
+    sample_dataset[idx_distribution].append(samples)
+
+    for _, (sample, idx_distribution) in zip(range(100), sampler()):
+
+        sample_dataset[idx_distribution].append(sample)
 
         samples = np.concatenate((samples, sample), axis=1)
 
@@ -134,65 +97,53 @@ def naive_kmeans():
 
         clusters = update_step(clusters)
 
-        stop, old_error = error_clusters(clusters, old_error=old_error)
 
+    # PLOT
 
-        if i > 0:
-            distr_angles, mean_centroid = compute_angles(clusters)
+    mean_centroid, polarity_angles = compute_sectors(clusters)
 
-            distr_angles.sort()
-            angles = [(distr_angles[0] + distr_angles[1]) / 2, (distr_angles[1] + distr_angles[2]) / 2, (distr_angles[2] + distr_angles[0] + 2 * np.pi) / 2]
-            # print(old_error)
-            plt.xlim([-1, 1])
-            plt.ylim([-1, 1])
+    mid_angles = []
+    for idx_cluster in range(k_dim - 1):
+        mid_angles.append((polarity_angles[idx_cluster] + polarity_angles[idx_cluster + 1]) / 2.0)
+    mid_angles.append((polarity_angles[-1] + polarity_angles[0] + 2.0 * np.pi) / 2.0)
 
-            # plt.plot(samples[0, :], samples[1, :], 'o')
-            sample_k1 = np.asarray([x for x, idx in sample_v if idx == 0])
-            sample_k2 = np.asarray([x for x, idx in sample_v if idx == 1])
-            sample_k3 = np.asarray([x for x, idx in sample_v if idx == 2])
-            if sample_k1.shape != (0,):
-                plt.plot(sample_k1[:, 0], sample_k1[:, 1], 'ro')
-            if sample_k2.shape != (0,):
-                plt.plot(sample_k2[:, 0], sample_k2[:, 1], 'go')
-            if sample_k3.shape != (0,):
-                plt.plot(sample_k3[:, 0], sample_k3[:, 1], 'yo')
+    # plot limits
+    plt.xlim([-1, 1])
+    plt.ylim([-1, 1])
 
-            for cluster in clusters:
-                plt.plot(cluster.mean[0], cluster.mean[1], 'x')
+    # Plot point distributions
+    for idx_cluster in range(k_dim):
+        size_specific_samples = len(sample_dataset[idx_cluster])
+        specific_samples = np.zeros((dim, size_specific_samples))
 
-            plt.plot(mean_centroid[0], mean_centroid[1], 'ok')
+        for idx_sample, sample in enumerate(sample_dataset[idx_cluster]):
+            if specific_samples.shape[1] == 1:
+                specific_samples = sample
+            else:
+                for idx_element in range(sample.shape[0]):
+                    specific_samples[idx_element, idx_sample] = sample[idx_element]
 
-            plt.plot([mean_centroid[0], mean_centroid[0] + np.cos(angles[0])],
-                     [mean_centroid[1], mean_centroid[1] + np.sin(angles[0])], 'k')
-            plt.plot([mean_centroid[0], mean_centroid[0] + np.cos(angles[1])],
-                     [mean_centroid[1], mean_centroid[1] + np.sin(angles[1])], 'k')
-            plt.plot([mean_centroid[0], mean_centroid[0] + np.cos(angles[2])],
-                     [mean_centroid[1], mean_centroid[1] + np.sin(angles[2])], 'k')
+        if size_specific_samples != 0:
+            if size_specific_samples == 1:
+                plt.plot(specific_samples[0], specific_samples[1], 'o', color=clusters[idx_cluster].col)
+            else:
+                plt.plot(specific_samples[0, :], specific_samples[1, :], 'o', color=clusters[idx_cluster].col)
 
-            plt.grid()
+    # Plot cluster centroid
+    for cluster in clusters:
+        plt.plot(cluster.mean[0], cluster.mean[1], 'x')
 
-            plt.show()
-        a =0
-def kmeans():
+    # Plot line for splitting areas
+    plt.plot(mean_centroid[0], mean_centroid[1], 'ok')
 
-    stds = .1 * np.random.rand(2)
-    means = np.random.rand(2) - .5
+    for mid_angle in mid_angles:
+        plt.plot([mean_centroid[0], mean_centroid[0] + 3 * np.cos(mid_angle)],
+                 [mean_centroid[1], mean_centroid[1] + 3 * np.sin(mid_angle)], 'k')
 
-    X = []
-    X.append(np.random.normal(means[0], stds[0], size=(2, 100)))
-    X.append(np.random.normal(means[1], stds[1], size=(2, 100)))
-
-    plt.xlim([-0.55, 0.55])
-    plt.ylim([-0.55, 0.55])
-
-    plt.plot(X[0][0, :], X[0][1, :], 'o')
-    plt.plot(X[1][0][:], X[1][1][:], 'x')
     plt.grid()
 
+    plt.show()
 
-def test_assignment():
-    naive_kmeans()
 
 if __name__ == "__main__":
-    test_assignment()
-    plt.show()
+    naive_kmeans()
